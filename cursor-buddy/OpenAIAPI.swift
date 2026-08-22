@@ -6,16 +6,19 @@
 import Foundation
 
 /// OpenAI API helper for screen-aware responses through the Responses API.
+/// Supports custom bases via OPENAI_BASE_URL / OPENROUTER_BASE_URL / GROK_BASE_URL / LLM_BASE_URL
+/// e.g. LM Studio: http://localhost:1234  , OpenRouter: https://openrouter.ai/api/v1
 class OpenAIAPI {
     private var apiKey: String?
-    private let apiURL: URL
+    private var apiURL: URL {
+        URL(string: AppBundleConfiguration.openAIResponsesURL())!
+    }
     var model: String
     var maxOutputTokens: Int
     private let session: URLSession
 
     init(apiKey: String?, model: String = "gpt-5.4", maxOutputTokens: Int = 128_000) {
         self.apiKey = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines)
-        self.apiURL = URL(string: "https://api.openai.com/v1/responses")!
         self.model = model
         self.maxOutputTokens = maxOutputTokens
 

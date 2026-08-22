@@ -96,13 +96,18 @@ nonisolated enum AppBundleConfiguration {
     }
 
     static func anthropicAPIKey() -> String? {
+        // When a custom base URL is set, also accept friendly aliases like OPENROUTER_API_KEY
+        // so users don't need to use the ANTHROPIC_ name when they're not using Claude.
         let configuredAnthropicAPIKey = userDefaultsValue(forKey: userAnthropicAPIKeyDefaultsKey) ?? stringValue(
             forKey: "AnthropicAPIKey",
-            environmentKeys: ["ANTHROPIC_API_KEY"]
+            environmentKeys: ["ANTHROPIC_API_KEY", "OPENROUTER_API_KEY", "GROK_API_KEY", "LLM_API_KEY", "GROK_BUILD_API_KEY"]
         ) ?? localDevelopmentEnvironmentValue(forKey: "ANTHROPIC_API_KEY")
+            ?? localDevelopmentEnvironmentValue(forKey: "OPENROUTER_API_KEY")
+            ?? localDevelopmentEnvironmentValue(forKey: "GROK_API_KEY")
+            ?? localDevelopmentEnvironmentValue(forKey: "LLM_API_KEY")
 
         guard let configuredAnthropicAPIKey else { return nil }
-        // A custom ANTHROPIC_BASE_URL (e.g. a MiniMax or other Anthropic-compatible
+        // A custom ANTHROPIC_BASE_URL (e.g. OpenRouter, MiniMax, or other Anthropic-compatible
         // provider) implies keys won't follow Anthropic's own "sk-ant-api" prefix.
         if usesCustomAnthropicBaseURL {
             return configuredAnthropicAPIKey
@@ -113,15 +118,20 @@ nonisolated enum AppBundleConfiguration {
     static let defaultAnthropicBaseURL = "https://api.anthropic.com"
 
     /// Base URL for Anthropic-compatible /v1/messages requests. Lets OpenClicky
-    /// point at a compatible provider (e.g. MiniMax) instead of api.anthropic.com.
+    /// point at a compatible provider (e.g. OpenRouter, MiniMax, grok.build) instead
+    /// of api.anthropic.com. Also accepts friendly aliases OPENROUTER_BASE_URL,
+    /// GROK_BASE_URL, LLM_BASE_URL so you don't need the ANTHROPIC_ name.
     /// Falls back to the default on anything that isn't a well-formed absolute
     /// http(s) URL with a host, since callers build request URLs from this with
     /// a force-unwrapped `URL(string:)!` — a malformed value must never reach them.
     static func anthropicBaseURL() -> String {
         let configured = stringValue(
             forKey: "AnthropicBaseURL",
-            environmentKeys: ["ANTHROPIC_BASE_URL"]
+            environmentKeys: ["ANTHROPIC_BASE_URL", "OPENROUTER_BASE_URL", "GROK_BASE_URL", "LLM_BASE_URL", "OPENAI_BASE_URL"]
         ) ?? localDevelopmentEnvironmentValue(forKey: "ANTHROPIC_BASE_URL")
+            ?? localDevelopmentEnvironmentValue(forKey: "OPENROUTER_BASE_URL")
+            ?? localDevelopmentEnvironmentValue(forKey: "GROK_BASE_URL")
+            ?? localDevelopmentEnvironmentValue(forKey: "LLM_BASE_URL")
 
         guard let configured, !configured.isEmpty else { return defaultAnthropicBaseURL }
 
@@ -147,11 +157,66 @@ nonisolated enum AppBundleConfiguration {
         anthropicBaseURL() != defaultAnthropicBaseURL
     }
 
+    static let defaultOpenAIBaseURL = "https://api.openai.com"
+
+    /// Base URL for OpenAI-compatible requests. Supports friendly aliases so you
+    /// don't need to remember the OPENAI_ prefix — set any of these:
+    /// OPENAI_BASE_URL, OPENROUTER_BASE_URL, GROK_BASE_URL, LLM_BASE_URL.
+    /// Example: OPENAI_BASE_URL=http://localhost:1234  (LM Studio)
+    ///          OPENROUTER_BASE_URL=https://openrouter.ai/api/v1  (OpenRouter)
+    static func openAIBaseURL() -> String {
+        let configured = stringValue(
+            forKey: "OpenAIBaseURL",
+            environmentKeys: ["OPENAI_BASE_URL", "OPENROUTER_BASE_URL", "GROK_BASE_URL", "LLM_BASE_URL", "OPENAI_API_BASE"]
+        ) ?? localDevelopmentEnvironmentValue(forKey: "OPENAI_BASE_URL")
+            ?? localDevelopmentEnvironmentValue(forKey: "OPENROUTER_BASE_URL")
+            ?? localDevelopmentEnvironmentValue(forKey: "GROK_BASE_URL")
+            ?? localDevelopmentEnvironmentValue(forKey: "LLM_BASE_URL")
+            ?? localDevelopmentEnvironmentValue(forKey: "OPENAI_API_BASE")
+
+        guard let configured, !configured.isEmpty else { return defaultOpenAIBaseURL }
+
+        var trimmed = configured
+        while trimmed.hasSuffix("/") {
+            trimmed.removeLast()
+        }
+
+        guard let components = URLComponents(string: trimmed),
+              let scheme = components.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              let host = components.host,
+              !host.isEmpty,
+              components.query == nil,
+              components.fragment == nil else {
+            return defaultOpenAIBaseURL
+        }
+
+        return trimmed
+    }
+
+    static var usesCustomOpenAIBaseURL: Bool {
+        openAIBaseURL() != defaultOpenAIBaseURL
+    }
+
+    /// Full URL for the OpenAI Responses API. Handles custom bases like
+    /// http://localhost:1234 (LM Studio) or https://openrouter.ai/api/v1.
+    static func openAIResponsesURL() -> String {
+        let base = openAIBaseURL()
+        if base.contains("/v1/responses") || base.contains("/v1/chat/completions") {
+            return base
+        }
+        return base + "/v1/responses"
+    }
+
     static func openAIAPIKey() -> String? {
+        // Support friendly aliases so OpenRouter / Grok / LM Studio keys work without renaming
         userDefaultsValue(forKey: userCodexAgentAPIKeyDefaultsKey) ?? stringValue(
             forKey: "OpenAIAPIKey",
-            environmentKeys: ["OPENAI_API_KEY"]
+            environmentKeys: ["OPENAI_API_KEY", "OPENROUTER_API_KEY", "GROK_API_KEY", "LLM_API_KEY", "GROK_BUILD_API_KEY"]
         ) ?? localDevelopmentEnvironmentValue(forKey: "OPENAI_API_KEY")
+            ?? localDevelopmentEnvironmentValue(forKey: "OPENROUTER_API_KEY")
+            ?? localDevelopmentEnvironmentValue(forKey: "GROK_API_KEY")
+            ?? localDevelopmentEnvironmentValue(forKey: "LLM_API_KEY")
     }
 
     static func gogKeyringPassword() -> String? {
