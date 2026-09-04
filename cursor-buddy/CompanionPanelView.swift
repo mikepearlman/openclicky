@@ -91,14 +91,6 @@ struct CompanionPanelView: View {
             alignment: .topLeading
         )
         .background(panelBackground)
-        .onAppear {
-            // Surface the base microphone prompt when the permission guide
-            // first appears. Optional camera features request their own access
-            // at the point the user enables them.
-            if !companionManager.allPermissionsGranted {
-                companionManager.requestPendingPermissionPrompts()
-            }
-        }
         .onChange(of: companionManager.isAdvancedModeEnabled) {
             schedulePanelContentSizeRefresh()
         }

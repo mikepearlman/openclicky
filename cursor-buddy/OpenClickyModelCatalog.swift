@@ -6,6 +6,8 @@ nonisolated enum OpenClickyModelProvider: String, Equatable {
     case openAI
     case codex
     case deepgram
+    case openCodeGo
+    case nvidia
 
     var displayName: String {
         switch self {
@@ -19,6 +21,10 @@ nonisolated enum OpenClickyModelProvider: String, Equatable {
             return "Codex"
         case .deepgram:
             return "Deepgram"
+        case .openCodeGo:
+            return "OpenCode Go"
+        case .nvidia:
+            return "NVIDIA"
         }
     }
 
@@ -34,7 +40,7 @@ nonisolated enum OpenClickyModelProvider: String, Equatable {
             return .codex
         case .openAI:
             return .codex
-        case .deepgram:
+        case .deepgram, .openCodeGo, .nvidia:
             return nil
         }
     }
@@ -87,6 +93,17 @@ nonisolated struct OpenClickyModelOption: Identifiable, Equatable {
     /// asks for a deeper answer the TTS pipeline should be allowed to keep
     /// generating rather than truncating at an artificial "spoken" budget.
     let maxOutputTokens: Int
+
+    var remoteModelID: String {
+        switch provider {
+        case .openCodeGo:
+            return String(id.dropFirst("opencode-go/".count))
+        case .nvidia:
+            return String(id.dropFirst("nvidia/".count))
+        default:
+            return id
+        }
+    }
 }
 
 nonisolated enum OpenClickyModelCatalog {
@@ -162,6 +179,77 @@ nonisolated enum OpenClickyModelCatalog {
         OpenClickyModelOption(id: "gpt-5.6-terra", label: "GPT-5.6 Terra", provider: .openAI, maxOutputTokens: 128_000),
         OpenClickyModelOption(id: "gpt-5.6-luna", label: "GPT-5.6 Luna", provider: .openAI, maxOutputTokens: 128_000)
     ]
+
+    static let recommendedOpenCodeGoModelIDs = [
+        "gpt-5.6-luna",
+        "grok-4.6",
+        "kimi-k3",
+        "kimi-k2.7-code",
+        "glm-5.3-flash",
+        "deepseek-v4-pro",
+        "deepseek-v4-flash-vision-exp",
+        "minimax-m3"
+    ]
+
+    static let recommendedNVIDIAModelIDs = [
+        "nvidia/nemotron-3.5-lightning-30b-a3b",
+        "meta/muse-glimmer-30b",
+        "moonshotai/kimi-k3",
+        "deepseek-ai/deepseek-v4-pro-0813",
+        "deepseek-ai/deepseek-v4-flash-0731",
+        "poolside/laguna-xs-2.1",
+        "minimaxai/minimax-m3",
+        "openai/gpt-oss-120b"
+    ]
+
+    static func externalModelOption(provider: OpenClickyModelProvider, remoteModelID: String) -> OpenClickyModelOption? {
+        let trimmed = remoteModelID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        switch provider {
+        case .openCodeGo:
+            return OpenClickyModelOption(
+                id: "opencode-go/\(trimmed)",
+                label: "OpenCode Go: \(friendlyExternalModelName(trimmed))",
+                provider: .openCodeGo,
+                maxOutputTokens: 8_192
+            )
+        case .nvidia:
+            return OpenClickyModelOption(
+                id: "nvidia/\(trimmed)",
+                label: "NVIDIA: \(friendlyExternalModelName(trimmed))",
+                provider: .nvidia,
+                maxOutputTokens: 8_192
+            )
+        default:
+            return nil
+        }
+    }
+
+    static func externalModelOption(withID modelID: String) -> OpenClickyModelOption? {
+        if modelID.hasPrefix("opencode-go/") {
+            return externalModelOption(provider: .openCodeGo, remoteModelID: String(modelID.dropFirst("opencode-go/".count)))
+        }
+        if modelID.hasPrefix("nvidia/") {
+            return externalModelOption(provider: .nvidia, remoteModelID: String(modelID.dropFirst("nvidia/".count)))
+        }
+        return nil
+    }
+
+    private static func friendlyExternalModelName(_ modelID: String) -> String {
+        let leaf = modelID.split(separator: "/").last.map(String.init) ?? modelID
+        return leaf
+            .split(separator: "-")
+            .map { part in
+                let value = String(part)
+                if value.allSatisfy({ $0.isNumber || $0 == "." }) { return value }
+                if ["gpt", "glm", "kimi", "qwen", "mimo", "hy"].contains(value.lowercased()) {
+                    return value.uppercased()
+                }
+                return value.prefix(1).uppercased() + value.dropFirst()
+            }
+            .joined(separator: " ")
+    }
     // Local MLX models are intentionally NOT offered for Agent Mode: the local
     // endpoint (mlx_lm at 127.0.0.1:32124) only speaks /v1/chat/completions,
     // but Codex requires the Responses API, so routing agents there 404s on
@@ -196,6 +284,9 @@ nonisolated enum OpenClickyModelCatalog {
         if let match = responseVoiceModels.first(where: { $0.id == resolved }) {
             return match
         }
+        if let externalModel = externalModelOption(withID: resolved) {
+            return externalModel
+        }
         // Unknown IDs reset to the product default (speech-to-speech), not the
         // first text model in the list (which used to silently become Haiku).
         return responseVoiceModels.first { $0.id == defaultVoiceResponseModelID }
@@ -206,6 +297,9 @@ nonisolated enum OpenClickyModelCatalog {
     static func voiceAnalysisModel(withID modelID: String?) -> OpenClickyModelOption {
         if let modelID {
             let resolved = normalizedModelID(modelID)
+            if let externalModel = externalModelOption(withID: resolved) {
+                return externalModel
+            }
             if !isSpeechModelID(resolved),
                let match = voiceResponseModels.first(where: { $0.id == resolved }) {
                 return match

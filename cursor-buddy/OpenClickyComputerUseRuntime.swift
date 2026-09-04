@@ -749,39 +749,33 @@ enum OpenClickyMacPrivacyPermissionProbe {
         return status == noErr
     }
 
-    static func hasLikelyFullDiskAccess(fileManager: FileManager = .default) -> Bool {
-        let home = fileManager.homeDirectoryForCurrentUser
-        let candidates = [
-            home.appendingPathComponent("Library/Messages/chat.db"),
-            home.appendingPathComponent("Library/Safari/History.db"),
-            home.appendingPathComponent("Library/Mail", isDirectory: true)
+    /// macOS has no public, non-prompting Full Disk Access status API.
+    /// We use access(R_OK) to check read permission on protected paths
+    /// without opening user-sensitive file contents. EACCES/EPERM means
+    /// denied; success means granted; ENOENT means file missing.
+    static func hasLikelyFullDiskAccess() -> Bool? {
+        let protectedPaths = [
+            NSHomeDirectory() + "/Library/Messages/chat.db",
+            NSHomeDirectory() + "/Library/Messages",
+            NSHomeDirectory() + "/Library/Mail/V10/",
+            NSHomeDirectory() + "/Library/Mail"
         ]
-
-        for candidate in candidates where fileManager.fileExists(atPath: candidate.path) {
-            if canReadProtectedItem(candidate, fileManager: fileManager) {
+        var gotPermissionDenied = false
+        for path in protectedPaths {
+            if access(path, R_OK) == 0 {
                 return true
             }
+            let err = errno
+            if err == EACCES || err == EPERM || err == 13 { // 13 = EACCES on Darwin
+                gotPermissionDenied = true
+            }
         }
-
-        return false
-    }
-
-    private static func canReadProtectedItem(_ url: URL, fileManager: FileManager) -> Bool {
-        var isDirectory: ObjCBool = false
-        guard fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
+        if gotPermissionDenied {
             return false
         }
-
-        if isDirectory.boolValue {
-            return (try? fileManager.contentsOfDirectory(atPath: url.path)) != nil
-        }
-
-        guard let handle = FileHandle(forReadingAtPath: url.path) else {
-            return false
-        }
-        try? handle.close()
-        return true
+        return nil
     }
+
 }
 
 enum OpenClickyComputerUseAppEnumerator {

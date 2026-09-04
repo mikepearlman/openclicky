@@ -1,7 +1,8 @@
 import Foundation
 
 enum OpenClickyWidgetSnapshotReader {
-    static let appGroupIdentifier = "group.com.jkneen.openclicky"
+    static let appGroupIdentifier = Bundle.main.object(forInfoDictionaryKey: "OpenClickyAppGroupIdentifier") as? String
+        ?? "group.com.jkneen.openclicky"
     static let snapshotFileName = "widget-snapshot.json"
 
     static func readSnapshot(fileManager: FileManager = .default) -> OpenClickyWidgetSnapshot {

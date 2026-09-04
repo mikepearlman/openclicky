@@ -36,6 +36,8 @@ nonisolated enum AppBundleConfiguration {
     static let userAppLineSpacingDefaultsKey = "openClickyAppLineSpacing"
     static let userAppBoldTextDefaultsKey = "openClickyAppBoldTextEnabled"
     static let userCodexAgentAPIKeyDefaultsKey = "openClickyCodexAgentAPIKey"
+    static let userOpenCodeGoAPIKeyDefaultsKey = "openClickyOpenCodeGoAPIKey"
+    static let userNVIDIAAPIKeyDefaultsKey = "openClickyNVIDIAAPIKey"
     static let userAssemblyAIAPIKeyDefaultsKey = "openClickyAssemblyAIAPIKey"
     static let userDeepgramAPIKeyDefaultsKey = "openClickyDeepgramAPIKey"
     static let userVoiceTranscriptionProviderDefaultsKey = "openClickyVoiceTranscriptionProvider"
@@ -68,7 +70,8 @@ nonisolated enum AppBundleConfiguration {
     /// When true (default), sample only while the primary mouse button is dragged during PTT hold.
     /// When false, any mouse movement while holding the key draws.
     static let userCircleWhileTalkingRequireClickDefaultsKey = "openClickyCircleWhileTalkingRequireClick"
-    static let appGroupIdentifier = "group.com.jkneen.openclicky"
+    static let appGroupIdentifier = Bundle.main.object(forInfoDictionaryKey: "OpenClickyAppGroupIdentifier") as? String
+        ?? "group.com.jkneen.openclicky"
 
     static func registerDefaults() {
         UserDefaults.standard.register(defaults: [
@@ -152,6 +155,49 @@ nonisolated enum AppBundleConfiguration {
             forKey: "OpenAIAPIKey",
             environmentKeys: ["OPENAI_API_KEY"]
         ) ?? localDevelopmentEnvironmentValue(forKey: "OPENAI_API_KEY")
+    }
+
+    static func openCodeGoAPIKey() -> String? {
+        userDefaultsValue(forKey: userOpenCodeGoAPIKeyDefaultsKey) ?? stringValue(
+            forKey: "OpenCodeGoAPIKey",
+            environmentKeys: ["OPENCODE_GO_API_KEY"]
+        ) ?? localDevelopmentEnvironmentValue(forKey: "OPENCODE_GO_API_KEY")
+    }
+
+    static func nvidiaAPIKey() -> String? {
+        userDefaultsValue(forKey: userNVIDIAAPIKeyDefaultsKey) ?? stringValue(
+            forKey: "NVIDIAAPIKey",
+            environmentKeys: ["NVIDIA_API_KEY"]
+        ) ?? localDevelopmentEnvironmentValue(forKey: "NVIDIA_API_KEY")
+    }
+
+    static func openCodeGoBaseURL() -> URL {
+        configuredBaseURL(
+            infoKey: "OpenCodeGoBaseURL",
+            environmentKey: "OPENCODE_GO_BASE_URL",
+            fallback: URL(string: "https://opencode.ai/zen/go/v1")!
+        )
+    }
+
+    static func nvidiaBaseURL() -> URL {
+        configuredBaseURL(
+            infoKey: "NVIDIABaseURL",
+            environmentKey: "NVIDIA_BASE_URL",
+            fallback: URL(string: "https://integrate.api.nvidia.com/v1")!
+        )
+    }
+
+    private static func configuredBaseURL(infoKey: String, environmentKey: String, fallback: URL) -> URL {
+        let rawValue = stringValue(forKey: infoKey, environmentKeys: [environmentKey])
+            ?? localDevelopmentEnvironmentValue(forKey: environmentKey)
+        guard let rawValue,
+              let url = URL(string: rawValue),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "https" || scheme == "http",
+              url.host != nil else {
+            return fallback
+        }
+        return url
     }
 
     static func gogKeyringPassword() -> String? {
@@ -431,6 +477,8 @@ nonisolated enum AppBundleConfiguration {
         userElevenLabsAPIKeyDefaultsKey,
         userCartesiaAPIKeyDefaultsKey,
         userCodexAgentAPIKeyDefaultsKey,
+        userOpenCodeGoAPIKeyDefaultsKey,
+        userNVIDIAAPIKeyDefaultsKey,
         userAssemblyAIAPIKeyDefaultsKey,
         userDeepgramAPIKeyDefaultsKey,
         userExternalControlBridgeTokenDefaultsKey

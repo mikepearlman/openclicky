@@ -24,7 +24,7 @@ class WindowPositionManager {
 
     private static var hasAttemptedAccessibilitySystemPromptDuringCurrentLaunch = false
     private static var hasAttemptedScreenRecordingSystemPromptDuringCurrentLaunch = false
-    private static let hasPreviouslyConfirmedScreenRecordingPermissionUserDefaultsKey = "com.learningbuddy.hasPreviouslyConfirmedScreenRecordingPermission"
+    static let hasPreviouslyConfirmedScreenRecordingPermissionUserDefaultsKey = "com.learningbuddy.hasPreviouslyConfirmedScreenRecordingPermission"
 
     /// Returns true when the Mac currently has more than one connected display.
     /// Uses AppKit's screen list, which is available without ScreenCaptureKit's

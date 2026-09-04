@@ -153,13 +153,13 @@ public struct OpenClickyComputerUsePermissionStatus: Sendable, Codable, Hashable
     public let accessibilityGranted: Bool
     public let screenRecordingGranted: Bool
     public let skyLightKeyboardPathAvailable: Bool
-    public let fullDiskAccessLikelyGranted: Bool
+    public let fullDiskAccessLikelyGranted: Bool?
 
     public init(
         accessibilityGranted: Bool,
         screenRecordingGranted: Bool,
         skyLightKeyboardPathAvailable: Bool,
-        fullDiskAccessLikelyGranted: Bool = false
+        fullDiskAccessLikelyGranted: Bool? = nil
     ) {
         self.accessibilityGranted = accessibilityGranted
         self.screenRecordingGranted = screenRecordingGranted
@@ -180,7 +180,11 @@ public struct OpenClickyComputerUsePermissionStatus: Sendable, Codable, Hashable
     }
 
     public var fullDiskAccessSummary: String {
-        fullDiskAccessLikelyGranted ? "Full Disk Access likely ready" : "Full Disk Access not detected"
+        switch fullDiskAccessLikelyGranted {
+        case true: return "Full Disk Access likely ready"
+        case false: return "Full Disk Access not detected"
+        case nil: return "Full Disk Access: check System Settings"
+        }
     }
 }
 

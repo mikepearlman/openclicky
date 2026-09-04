@@ -86,28 +86,22 @@ struct cursor_buddyApp: App {
 final class CompanionAppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, SPUStandardUserDriverDelegate {
     private static let sparkleFeedOverrideDefaultsKey = "OpenClickySparkleFeedURLOverride"
     private var menuBarPanelManager: MenuBarPanelManager?
-    private let companionManager = CompanionManager()
+    private lazy var companionManager = CompanionManager()
+    private var hasStartedCompanion = false
     private var sparkleUpdaterController: SPUStandardUpdaterController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         print("OpenClicky: Starting...")
         print("OpenClicky: Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown")")
 
-        // Terminate any duplicate running instances of OpenClicky to prevent port (error 48) and permission conflicts
-        let currentApp = NSRunningApplication.current
-        let runningApps = NSWorkspace.shared.runningApplications
-        if let bundleID = currentApp.bundleIdentifier {
-            let duplicateApps = runningApps.filter { app in
-                app.bundleIdentifier == bundleID && app.processIdentifier != currentApp.processIdentifier
-            }
-            for app in duplicateApps {
-                print("OpenClicky: Terminating duplicate running instance (PID: \(app.processIdentifier)) to free resources/ports.")
-                app.terminate()
-            }
-            if !duplicateApps.isEmpty {
-                // Give the system a brief moment to release TCP sockets and file handles
-                Thread.sleep(forTimeInterval: 0.3)
-            }
+        // Keep the existing instance and its permission dialogs alive. A second
+        // launch must not terminate the app the user is already approving.
+        if let bundleID = Bundle.main.bundleIdentifier,
+           let existingApp = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+            .first(where: { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }) {
+            existingApp.activate(options: [.activateAllWindows])
+            NSApp.terminate(nil)
+            return
         }
 
         UserDefaults.standard.register(defaults: ["NSInitialToolTipDelay": 0])
@@ -122,6 +116,7 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDel
         OpenClickyDesktopNotificationCenter.shared.configure()
 
         menuBarPanelManager = MenuBarPanelManager(companionManager: companionManager)
+        hasStartedCompanion = true
         companionManager.start()
         companionManager.scheduleWidgetSnapshotPublish()
         registerAsLoginItemIfNeeded()
@@ -129,7 +124,7 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDel
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        companionManager.stop()
+        if hasStartedCompanion { companionManager.stop() }
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {

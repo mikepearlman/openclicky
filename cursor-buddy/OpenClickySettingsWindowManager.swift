@@ -146,9 +146,9 @@ private enum OpenClickySettingsSection: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .basic: return "Basic"
-        case .advancedProviders: return "Advanced Providers"
-        case .computerUse: return "Computer Use"
+        case .basic: return "Everyday settings"
+        case .advancedProviders: return "Voice and services"
+        case .computerUse: return "Control your Mac"
         case .permissions: return "Permissions"
         case .agents: return "Agents"
         case .automations: return "Automations"
@@ -185,6 +185,7 @@ struct OpenClickySettingsView: View {
     @StateObject private var localSpeechModelManager = OpenClickyLocalSpeechModelManager.shared
     @StateObject private var localModelDownloadService = OpenClickyLocalModelDownloadService.shared
     @StateObject private var localInferenceRuntime = OpenClickyLocalInferenceRuntimeManager.shared
+    @StateObject private var externalModels = OpenClickyExternalModelStore()
     @AppStorage(ClickyAccentTheme.userDefaultsKey) private var selectedAccentThemeID = ClickyAccentTheme.blue.rawValue
     @AppStorage(ClickyCursorAvatarStyle.userDefaultsKey) private var avatarStyleRawValue = ClickyCursorAvatarStyle.default.storageValue
     @State private var userAnthropicAPIKey = ""
@@ -208,6 +209,8 @@ struct OpenClickySettingsView: View {
     @AppStorage(AppBundleConfiguration.userAppBoldTextDefaultsKey) private var appBoldTextEnabled = false
     @AppStorage(AppBundleConfiguration.openClickyVoicePlaybackVolumeDefaultsKey) private var openClickyVoicePlaybackVolume = AppBundleConfiguration.voicePlaybackVolume()
     @State private var userCodexAgentAPIKey = ""
+    @State private var userOpenCodeGoAPIKey = ""
+    @State private var userNVIDIAAPIKey = ""
     @State private var userAssemblyAIAPIKey = ""
     @State private var userDeepgramAPIKey = ""
     @AppStorage(AppBundleConfiguration.userMCPDeveloperDocsEnabledDefaultsKey) private var mcpDeveloperDocsEnabled = false
@@ -360,15 +363,21 @@ struct OpenClickySettingsView: View {
             if newSection == .permissions {
                 refreshNotificationAuthorizationStatus()
             }
+            if newSection == .models {
+                Task { await externalModels.refresh() }
+            }
         }
         .onAppear {
             refreshNotificationAuthorizationStatus()
             loadConfiguredSecretsForEditing()
+            Task { await externalModels.refresh() }
         }
     }
 
     private func loadConfiguredSecretsForEditing() {
         userCodexAgentAPIKey = AppBundleConfiguration.openAIAPIKey() ?? ""
+        userOpenCodeGoAPIKey = AppBundleConfiguration.openCodeGoAPIKey() ?? ""
+        userNVIDIAAPIKey = AppBundleConfiguration.nvidiaAPIKey() ?? ""
         userAnthropicAPIKey = AppBundleConfiguration.anthropicAPIKey() ?? ""
         userAssemblyAIAPIKey = AppBundleConfiguration.assemblyAIAPIKey() ?? ""
         userDeepgramAPIKey = AppBundleConfiguration.deepgramAPIKey() ?? ""
@@ -447,7 +456,7 @@ struct OpenClickySettingsView: View {
         case .connections:
             return "Google Workspace, persistent memory folders, logs, widgets, and utilities."
         case .models:
-            return "Offline model installs and the local inference runtime that gets models ready for use."
+            return "Choose a model for each task. Your connected services stay in one place."
         }
     }
 
@@ -649,17 +658,20 @@ struct OpenClickySettingsView: View {
                 permissionRow(
                     title: "Accessibility",
                     isGranted: companionManager.hasAccessibilityPermission,
-                    settingsURL: URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
+                    settingsURL: URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!,
+                    requestAccess: { WindowPositionManager.requestAccessibilityPermission() }
                 )
                 permissionRow(
                     title: "Screen Recording",
                     isGranted: companionManager.hasScreenRecordingPermission,
-                    settingsURL: URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
+                    settingsURL: URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!,
+                    requestAccess: { WindowPositionManager.requestScreenRecordingPermission() }
                 )
                 permissionRow(
                     title: "Microphone",
                     isGranted: companionManager.hasMicrophonePermission,
-                    settingsURL: URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!
+                    settingsURL: URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!,
+                    requestAccess: { companionManager.requestMicrophonePermission() }
                 )
             }
 
@@ -1246,8 +1258,7 @@ struct OpenClickySettingsView: View {
     }
 
     private var selectedResponseVoiceModelLabel: String {
-        OpenClickyModelCatalog.responseVoiceModels.first { $0.id == companionManager.selectedModel }?.label
-            ?? companionManager.selectedModel
+        OpenClickyModelCatalog.voiceResponseModel(withID: companionManager.selectedModel).label
     }
 
     private var openAIRealtimeVoiceSelection: Binding<String> {
@@ -1463,6 +1474,103 @@ struct OpenClickySettingsView: View {
 
     private var superAdvancedPanel: some View {
         VStack(alignment: .leading, spacing: 14) {
+            settingsGroup("Choose models by task") {
+                taskModelPickerRow(
+                    title: "Ask and explain",
+                    subtitle: "Answers questions and reads your screen when needed.",
+                    systemImageName: "bubble.left.and.text.bubble.right",
+                    options: askAndExplainModels,
+                    selectedModelID: companionManager.selectedModel,
+                    select: { companionManager.setSelectedModel($0) }
+                )
+
+                taskModelPickerRow(
+                    title: "Build and research",
+                    subtitle: "Runs Agent Mode with your ChatGPT subscription.",
+                    systemImageName: "hammer",
+                    options: OpenClickyModelCatalog.codexActionsModels,
+                    selectedModelID: session.model,
+                    select: { session.setModel($0) }
+                )
+
+                taskModelPickerRow(
+                    title: "Point and click",
+                    subtitle: "Finds controls and helps you use Mac apps.",
+                    systemImageName: "cursorarrow.click.2",
+                    options: OpenClickyModelCatalog.computerUseModels.filter { $0.provider == .codex },
+                    selectedModelID: companionManager.selectedComputerUseModel,
+                    select: { companionManager.setSelectedComputerUseModel($0) }
+                )
+            }
+
+            settingsGroup("Connected model services") {
+                valueRow(
+                    title: "ChatGPT subscription",
+                    subtitle: "Uses your Codex sign-in. No OpenAI key needed.",
+                    systemImageName: "checkmark.circle"
+                )
+
+                secureFieldRow(
+                    title: "OpenCode Go key",
+                    subtitle: externalModels.openCodeGoStatus,
+                    systemImageName: externalModels.openCodeGoModels.isEmpty ? "key" : "checkmark.circle",
+                    placeholder: "OpenCode Go key",
+                    text: Binding(
+                        get: { userOpenCodeGoAPIKey },
+                        set: { newValue in
+                            userOpenCodeGoAPIKey = newValue
+                            AppBundleConfiguration.persistSecret(
+                                newValue,
+                                defaultsKey: AppBundleConfiguration.userOpenCodeGoAPIKeyDefaultsKey
+                            )
+                        }
+                    )
+                )
+
+                secureFieldRow(
+                    title: "NVIDIA key",
+                    subtitle: externalModels.nvidiaStatus,
+                    systemImageName: externalModels.nvidiaModels.isEmpty ? "key" : "checkmark.circle",
+                    placeholder: "NVIDIA key",
+                    text: Binding(
+                        get: { userNVIDIAAPIKey },
+                        set: { newValue in
+                            userNVIDIAAPIKey = newValue
+                            AppBundleConfiguration.persistSecret(
+                                newValue,
+                                defaultsKey: AppBundleConfiguration.userNVIDIAAPIKeyDefaultsKey
+                            )
+                        }
+                    )
+                )
+
+                actionRow(
+                    title: externalModels.isRefreshing ? "Checking connections" : "Check connections",
+                    systemImageName: "arrow.clockwise"
+                ) {
+                    Task { await externalModels.refresh() }
+                }
+            }
+
+            if !externalModels.openCodeGoModels.isEmpty || !externalModels.nvidiaModels.isEmpty {
+                settingsGroup("Browse every connected model") {
+                    if !externalModels.openCodeGoModels.isEmpty {
+                        externalModelPickerRow(
+                            title: "OpenCode Go models",
+                            subtitle: "Pick any subscription model for Ask and explain.",
+                            options: externalModels.openCodeGoModels
+                        )
+                    }
+                    if !externalModels.nvidiaModels.isEmpty {
+                        externalModelPickerRow(
+                            title: "NVIDIA free models",
+                            subtitle: "Pick any available NVIDIA model for Ask and explain.",
+                            options: externalModels.nvidiaModels
+                        )
+                    }
+                }
+            }
+
             settingsGroup("Local inference runtime") {
                 valueRow(
                     title: "OpenClicky local endpoint",
@@ -1479,6 +1587,68 @@ struct OpenClickySettingsView: View {
 
             localModelInstallsGroup
         }
+    }
+
+    private var askAndExplainModels: [OpenClickyModelOption] {
+        let chatGPTModels = OpenClickyModelCatalog.voiceResponseModels.filter {
+            $0.provider == .openAI && !OpenClickyModelCatalog.isSpeechModelID($0.id)
+        }
+        var models = chatGPTModels + externalModels.recommendedModels
+        let selected = OpenClickyModelCatalog.voiceResponseModel(withID: companionManager.selectedModel)
+        if !models.contains(where: { $0.id == selected.id }) {
+            models.append(selected)
+        }
+        return models
+    }
+
+    private func taskModelPickerRow(
+        title: String,
+        subtitle: String,
+        systemImageName: String,
+        options: [OpenClickyModelOption],
+        selectedModelID: String,
+        select: @escaping (String) -> Void
+    ) -> some View {
+        HStack(spacing: 12) {
+            rowIcon(systemImageName)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(appUIFont(size: bodyFontSize, weight: .medium))
+                Text(subtitle)
+                    .font(appUIFont(size: subtextFontSize, weight: .regular))
+                    .foregroundColor(.secondary)
+            }
+            Spacer(minLength: 16)
+            Picker("", selection: Binding(get: { selectedModelID }, set: select)) {
+                if selectedModelID.isEmpty {
+                    Text("Choose a model").tag("")
+                }
+                ForEach(options) { option in
+                    Text(option.label).tag(option.id)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .frame(width: 260)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+    }
+
+    private func externalModelPickerRow(
+        title: String,
+        subtitle: String,
+        options: [OpenClickyModelOption]
+    ) -> some View {
+        let selectedModel = OpenClickyModelCatalog.voiceResponseModel(withID: companionManager.selectedModel)
+        let selectedID = options.contains(where: { $0.id == selectedModel.id }) ? selectedModel.id : ""
+        return taskModelPickerRow(
+            title: title,
+            subtitle: subtitle,
+            systemImageName: "square.stack.3d.up",
+            options: options,
+            selectedModelID: selectedID,
+            select: { companionManager.setSelectedModel($0) }
+        )
     }
 
     private var codexAgentEndpointSummary: String {
@@ -1655,38 +1825,45 @@ struct OpenClickySettingsView: View {
                 permissionRow(
                     title: "Accessibility",
                     isGranted: companionManager.hasAccessibilityPermission,
-                    settingsURL: URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
+                    settingsURL: URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!,
+                    requestAccess: { WindowPositionManager.requestAccessibilityPermission() }
                 )
                 permissionRow(
                     title: "Screen Recording",
                     isGranted: companionManager.hasScreenRecordingPermission,
-                    settingsURL: URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
+                    settingsURL: URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!,
+                    requestAccess: { WindowPositionManager.requestScreenRecordingPermission() }
                 )
                 permissionRow(
                     title: "Screen Content",
                     isGranted: companionManager.hasScreenContentPermission,
-                    settingsURL: URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
+                    settingsURL: URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!,
+                    requestAccess: { companionManager.requestScreenContentPermission() }
                 )
                 permissionRow(
                     title: "Microphone",
                     isGranted: companionManager.hasMicrophonePermission,
-                    settingsURL: URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!
+                    settingsURL: URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!,
+                    requestAccess: { companionManager.requestMicrophonePermission() }
                 )
                 permissionRow(
                     title: "Camera",
                     isGranted: companionManager.hasCameraPermission,
-                    settingsURL: URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera")!
+                    settingsURL: URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera")!,
+                    requestAccess: { companionManager.requestCameraPermission() }
                 )
                 permissionRow(
                     title: "Full Disk Access",
-                    isGranted: companionManager.hasFullDiskAccessPermission,
+                    statusText: "Check in System Settings",
+                    isGranted: companionManager.hasFullDiskAccessPermission == true,
                     settingsURL: OpenClickyMacPrivacyPermissionProbe.fullDiskAccessSettingsURL
                 )
                 permissionRow(
                     title: "System Events Automation",
                     statusText: companionManager.hasSystemEventsAutomationPermission ? "Granted for System Events" : "Needs Automation approval",
                     isGranted: companionManager.hasSystemEventsAutomationPermission,
-                    settingsURL: OpenClickyMacPrivacyPermissionProbe.automationSettingsURL
+                    settingsURL: OpenClickyMacPrivacyPermissionProbe.automationSettingsURL,
+                    requestAccess: { companionManager.requestSystemEventsAutomationPermission() }
                 )
                 valueRow(
                     title: "System volume commands",
@@ -1845,7 +2022,8 @@ struct OpenClickySettingsView: View {
                     title: "System Events",
                     statusText: companionManager.hasSystemEventsAutomationPermission ? "Ready for menu, process, and UI scripting probes" : "Needed for System Events UI scripting fallbacks",
                     isGranted: companionManager.hasSystemEventsAutomationPermission,
-                    settingsURL: OpenClickyMacPrivacyPermissionProbe.automationSettingsURL
+                    settingsURL: OpenClickyMacPrivacyPermissionProbe.automationSettingsURL,
+                    requestAccess: { companionManager.requestSystemEventsAutomationPermission() }
                 )
                 valueRow(
                     title: "Useful System Events routes",
@@ -2503,16 +2681,17 @@ struct OpenClickySettingsView: View {
         }
     }
 
-    private func permissionRow(title: String, isGranted: Bool, settingsURL: URL) -> some View {
+    private func permissionRow(title: String, isGranted: Bool, settingsURL: URL, requestAccess: (() -> Void)? = nil) -> some View {
         permissionRow(
             title: title,
             statusText: isGranted ? "Granted" : "Needs permission",
             isGranted: isGranted,
-            settingsURL: settingsURL
+            settingsURL: settingsURL,
+            requestAccess: requestAccess
         )
     }
 
-    private func permissionRow(title: String, statusText: String, isGranted: Bool, settingsURL: URL) -> some View {
+    private func permissionRow(title: String, statusText: String, isGranted: Bool, settingsURL: URL, requestAccess: (() -> Void)? = nil) -> some View {
         HStack(spacing: 12) {
             rowIcon(isGranted ? "checkmark.circle" : "exclamationmark.triangle")
                 .foregroundColor(isGranted ? .green : .orange)
@@ -2523,8 +2702,12 @@ struct OpenClickySettingsView: View {
                     .foregroundColor(.secondary)
             }
             Spacer()
-            Button("Open Settings") {
-                NSWorkspace.shared.open(settingsURL)
+            Button(!isGranted && requestAccess != nil ? "Grant Access" : "Open Settings") {
+                if !isGranted, let requestAccess {
+                    requestAccess()
+                } else {
+                    NSWorkspace.shared.open(settingsURL)
+                }
             }
             .controlSize(.small)
         }

@@ -511,7 +511,7 @@ final class CompanionManager: ObservableObject {
     @Published private(set) var hasScreenRecordingPermission = false
     @Published private(set) var hasMicrophonePermission = false
     @Published private(set) var hasScreenContentPermission = false
-    @Published private(set) var hasFullDiskAccessPermission = false
+    @Published private(set) var hasFullDiskAccessPermission: Bool? = nil
     @Published private(set) var hasSystemEventsAutomationPermission = false
     @Published private(set) var hasCameraPermission = false
 
@@ -1834,6 +1834,8 @@ final class CompanionManager: ObservableObject {
             }
         case .deepgram:
             deepgramVoiceAgentClient.warmUpConnection()
+        case .openCodeGo, .nvidia:
+            break
         }
     }
 
@@ -1885,6 +1887,8 @@ final class CompanionManager: ObservableObject {
                 voiceID: AppBundleConfiguration.deepgramTTSVoice(),
                 thinkModel: AppBundleConfiguration.deepgramVoiceAgentThinkModel()
             )
+        case .openCodeGo, .nvidia:
+            break
         }
     }
 
@@ -2252,11 +2256,10 @@ final class CompanionManager: ObservableObject {
     func start() {
         loadBundledKnowledgeIndex()
         refreshAllPermissions()
-        // Warm ScreenCaptureKit's window enumeration so the first
-        // screenshot after a key press doesn't pay the cold-start tax.
-        CompanionScreenCaptureUtility.prewarmShareableContent()
+        // Screen capture starts only after an explicit user action. Enumerating
+        // shareable content here can trigger a system prompt during launch.
         print("OpenClicky runtime identity - bundleID: \(Bundle.main.bundleIdentifier ?? "unknown"), appPath: \(Bundle.main.bundleURL.path)")
-        print("OpenClicky start - accessibility: \(hasAccessibilityPermission), screen: \(hasScreenRecordingPermission), mic: \(hasMicrophonePermission), camera: \(hasCameraPermission), screenContent: \(hasScreenContentPermission), fullDiskAccess: \(hasFullDiskAccessPermission), onboarded: \(hasCompletedOnboarding)")
+        print("OpenClicky start - accessibility: \(hasAccessibilityPermission), screen: \(hasScreenRecordingPermission), mic: \(hasMicrophonePermission), camera: \(hasCameraPermission), screenContent: \(hasScreenContentPermission), fullDiskAccess: \(hasFullDiskAccessPermission.map { String($0) } ?? "unknown"), onboarded: \(hasCompletedOnboarding)")
         startPermissionPolling()
         if runtimeMode == .menuBar {
             notchCaptureWindowManager.showPersistentPill(
@@ -2320,6 +2323,8 @@ final class CompanionManager: ObservableObject {
             if selectedVoiceResponseModel.provider == .codex || AppBundleConfiguration.openAIAPIKey() == nil {
                 codexVoiceSession.warmUp(systemPrompt: currentVoiceResponseSystemPrompt())
             }
+        case .openCodeGo, .nvidia:
+            break
         }
         // Force-init the active TTS provider and prime its TLS
         // handshake. The first sentence's TTS request would otherwise
@@ -3359,7 +3364,21 @@ final class CompanionManager: ObservableObject {
             globalPushToTalkShortcutMonitor.stop()
         }
 
-        hasScreenRecordingPermission = WindowPositionManager.hasScreenRecordingPermission()
+        let screenRecordingLive = WindowPositionManager.hasScreenRecordingPermission()
+        if !screenRecordingLive {
+            let persistedGrant = UserDefaults.standard.bool(forKey: WindowPositionManager.hasPreviouslyConfirmedScreenRecordingPermissionUserDefaultsKey)
+            if persistedGrant {
+                if previouslyHadScreenRecording {
+                    WindowPositionManager.clearPreviouslyConfirmedScreenRecordingPermission()
+                    UserDefaults.standard.removeObject(forKey: "hasScreenContentPermission")
+                }
+                hasScreenRecordingPermission = previouslyHadScreenRecording
+            } else {
+                hasScreenRecordingPermission = false
+            }
+        } else {
+            hasScreenRecordingPermission = true
+        }
 
         let micAuthStatus = AVCaptureDevice.authorizationStatus(for: .audio)
         hasMicrophonePermission = micAuthStatus == .authorized
@@ -3367,13 +3386,21 @@ final class CompanionManager: ObservableObject {
         let cameraAuthStatus = AVCaptureDevice.authorizationStatus(for: .video)
         hasCameraPermission = cameraAuthStatus == .authorized
 
-        // Screen content permission is persisted after the ScreenCaptureKit
-        // picker approves it, but it is only useful when real Screen Recording
-        // permission is also present.
         let persistedScreenContentPermission = UserDefaults.standard.bool(forKey: "hasScreenContentPermission")
         hasScreenContentPermission = hasScreenRecordingPermission && persistedScreenContentPermission
         hasFullDiskAccessPermission = OpenClickyMacPrivacyPermissionProbe.hasLikelyFullDiskAccess()
-        hasSystemEventsAutomationPermission = OpenClickyMacPrivacyPermissionProbe.hasSystemEventsAutomationPermission(prompt: false)
+
+        let systemEventsLive = OpenClickyMacPrivacyPermissionProbe.hasSystemEventsAutomationPermission(prompt: false)
+        let systemEventsRunning = !NSRunningApplication.runningApplications(withBundleIdentifier: OpenClickyMacPrivacyPermissionProbe.systemEventsBundleIdentifier).isEmpty
+        if systemEventsLive {
+            UserDefaults.standard.set(true, forKey: "com.openclicky.hasSystemEventsAutomationPermission")
+            hasSystemEventsAutomationPermission = true
+        } else if systemEventsRunning {
+            UserDefaults.standard.removeObject(forKey: "com.openclicky.hasSystemEventsAutomationPermission")
+            hasSystemEventsAutomationPermission = false
+        } else {
+            hasSystemEventsAutomationPermission = UserDefaults.standard.bool(forKey: "com.openclicky.hasSystemEventsAutomationPermission")
+        }
 
         // Debug: log permission state on changes
         if previouslyHadAccessibility != hasAccessibilityPermission
@@ -3382,7 +3409,7 @@ final class CompanionManager: ObservableObject {
             || previouslyHadCamera != hasCameraPermission
             || previouslyHadFullDiskAccess != hasFullDiskAccessPermission
             || previouslyHadSystemEventsAutomation != hasSystemEventsAutomationPermission {
-            print("Permissions — accessibility: \(hasAccessibilityPermission), screen: \(hasScreenRecordingPermission), mic: \(hasMicrophonePermission), camera: \(hasCameraPermission), screenContent: \(hasScreenContentPermission), fullDiskAccess: \(hasFullDiskAccessPermission), systemEventsAutomation: \(hasSystemEventsAutomationPermission)")
+            print("Permissions — accessibility: \(hasAccessibilityPermission), screen: \(hasScreenRecordingPermission), mic: \(hasMicrophonePermission), camera: \(hasCameraPermission), screenContent: \(hasScreenContentPermission), fullDiskAccess: \(hasFullDiskAccessPermission.map { String($0) } ?? "unknown"), systemEventsAutomation: \(hasSystemEventsAutomationPermission)")
         }
 
         // Track individual permission grants as they happen
@@ -3399,7 +3426,7 @@ final class CompanionManager: ObservableObject {
         if !previouslyHadCamera && hasCameraPermission {
             ClickyAnalytics.trackPermissionGranted(permission: "camera")
         }
-        if !previouslyHadFullDiskAccess && hasFullDiskAccessPermission {
+        if previouslyHadFullDiskAccess != true && hasFullDiskAccessPermission == true {
             ClickyAnalytics.trackPermissionGranted(permission: "full_disk_access")
         }
         if !previouslyHadSystemEventsAutomation && hasSystemEventsAutomationPermission {
@@ -3498,6 +3525,22 @@ final class CompanionManager: ObservableObject {
             Task { @MainActor [weak self] in
                 self?.hasMicrophonePermission = granted
             }
+        }
+    }
+
+    /// Requests microphone access from a user action, or opens Settings after denial.
+    func requestMicrophonePermission() {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .notDetermined:
+            promptForMicrophoneIfNotDetermined()
+        case .denied, .restricted:
+            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
+                NSWorkspace.shared.open(url)
+            }
+        case .authorized:
+            hasMicrophonePermission = true
+        @unknown default:
+            break
         }
     }
 
@@ -4307,6 +4350,14 @@ final class CompanionManager: ObservableObject {
             fields["transport"] = "codex_app_server_stdio"
             fields["streamingMethod"] = "codex_app_server_agentMessage_delta"
             fields["apiKeyFallback"] = AppBundleConfiguration.openAIAPIKey() != nil
+        case .openCodeGo, .nvidia:
+            fields["executionMethod"] = "OpenClickyExternalModelAPI.analyze"
+            fields["authMode"] = "provider_api_key"
+            fields["transport"] = OpenClickyExternalModelAPI.transport(
+                provider: executionModel.provider,
+                modelID: executionModel.remoteModelID
+            ).rawValue
+            fields["provider"] = executionModel.provider.rawValue
         }
 
         return fields

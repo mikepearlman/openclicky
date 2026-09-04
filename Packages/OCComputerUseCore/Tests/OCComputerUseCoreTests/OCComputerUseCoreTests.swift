@@ -20,7 +20,7 @@ struct OpenClickyComputerUseTests {
             visibleWindowCount: 7, focusedWindow: focusedWindow, lastErrorMessage: nil
         )
         #expect(status.isReadyForComputerUse)
-        #expect(status.summary == "Enabled · AX ready · screen ready · SkyLight keyboard ready · Full Disk Access not detected · Safari")
+        #expect(status.summary == "Enabled · AX ready · screen ready · SkyLight keyboard ready · Full Disk Access: check System Settings · Safari")
         #expect(status.focusedTargetSummary == "Safari — OpenClicky Test · pid 1234 · window 42")
     }
 

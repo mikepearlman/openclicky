@@ -822,6 +822,10 @@ extension CompanionManager {
             .sink { [weak self] _ in
                 guard let self,
                       self.isTutorModeEnabled,
+                      // The idle timer also runs during permission setup.
+                      // Never trigger ScreenCaptureKit's prompt automatically.
+                      self.hasAccessibilityPermission,
+                      self.hasScreenContentPermission,
                       self.voiceState == .idle,
                       !self.voiceTTSClient.isPlaying,
                       !self.isTutorObservationInFlight,
@@ -1135,6 +1139,15 @@ extension CompanionManager {
                 userPrompt: userPrompt,
                 onTextChunk: onTextChunk
             )
+        case .openCodeGo, .nvidia:
+            return try await analyzeExternalModelResponse(
+                model: selectedVoiceResponseModel,
+                images: images,
+                systemPrompt: systemPrompt,
+                conversationHistory: conversationHistory,
+                userPrompt: userPrompt,
+                onTextChunk: onTextChunk
+            )
         }
     }
 
@@ -1289,6 +1302,25 @@ extension CompanionManager {
             onTextChunk: onTextChunk
         )
         return text
+    }
+
+    private func analyzeExternalModelResponse(
+        model: OpenClickyModelOption,
+        images: [(data: Data, label: String)],
+        systemPrompt: String,
+        conversationHistory: [(userPlaceholder: String, assistantResponse: String)],
+        userPrompt: String,
+        onTextChunk: @MainActor @Sendable @escaping (String) -> Void
+    ) async throws -> String {
+        let api = try OpenClickyExternalModelAPI(provider: model.provider)
+        return try await api.analyze(
+            model: model,
+            images: images,
+            systemPrompt: systemPrompt,
+            conversationHistory: conversationHistory,
+            userPrompt: userPrompt,
+            onTextChunk: onTextChunk
+        )
     }
 
     private static func shouldUsePreResponseFiller(
@@ -1622,7 +1654,7 @@ extension CompanionManager {
             return .codexCLI
         case .openAI:
             return .openAIResponses
-        case .apple, .deepgram:
+        case .apple, .deepgram, .openCodeGo, .nvidia:
             return .unsupported
         }
     }
@@ -1666,7 +1698,7 @@ extension CompanionManager {
                 displayWidthInPoints: targetScreenCapture.displayWidthInPoints,
                 displayHeightInPoints: targetScreenCapture.displayHeightInPoints
             )
-        case .apple, .openAI, .deepgram:
+        case .apple, .openAI, .deepgram, .openCodeGo, .nvidia:
             return
         }
 
